@@ -106,11 +106,14 @@ type Queue struct {
 // If data stream is smaller or equal to inline size it will be stored in queue metadata,
 // otherwise it will be stored as linked file.
 //
+// Properties (could be nil) always stored in queue. Do not put too much information into properties because
+// queue item should be read in-memory before processing.
+//
 // Returns unique ID of the message.
-func (bq *Queue) Put(data io.Reader) (uint64, error) {
+func (bq *Queue) Put(data io.Reader, properties map[string][]byte) (uint64, error) {
 	var targetFile string
 
-	metadata, tempFile, err := bq.storeStream(data)
+	metadata, tempFile, err := bq.storeStream(data, properties)
 	if err != nil {
 		return 0, fmt.Errorf("store stream: %w", err)
 	}
@@ -326,9 +329,9 @@ func (bq *Queue) discard(id uint64, kind internal.PackagingType) error {
 	return nil
 }
 
-func (bq *Queue) storeStream(stream io.Reader) ([]byte, *os.File, error) {
+func (bq *Queue) storeStream(stream io.Reader, properties map[string][]byte) ([]byte, *os.File, error) {
 	var meta internal.Metadata
-	meta.Version = internal.CurrentVersion
+	meta.Properties = properties
 	meta.PackageType = internal.InlineData // by default
 
 	var buffer = make([]byte, 1+bq.inlineSize) // +1 for trigger
@@ -405,6 +408,16 @@ func (m *Message) Attempt() int64 {
 // Size of content in bytes.
 func (m *Message) Size() int64 {
 	return m.meta.Size
+}
+
+// Properties as user provided for Put. Any modifications will not be visible for next Get/Try operation (ie: not saved).
+func (m *Message) Properties() map[string][]byte {
+	return m.meta.Properties
+}
+
+// Get property and interpret it as string. Sugar for Properties().
+func (m *Message) Get(propertyName string) string {
+	return string(m.meta.Properties[propertyName])
 }
 
 // Read message content. Automatically opens linked file if needed.

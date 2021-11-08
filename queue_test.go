@@ -32,7 +32,7 @@ func TestNew(t *testing.T) {
 
 	defer q.Close()
 
-	id, err := q.Put(bytes.NewBufferString("some data"))
+	id, err := q.Put(bytes.NewBufferString("some data"), nil)
 	require.NoError(t, err)
 	require.NoFileExists(t, fmt.Sprint(tmpDir, "/", id)) // should be inlined
 
@@ -55,7 +55,7 @@ func TestNew(t *testing.T) {
 		_, err := io.ReadFull(rand.Reader, bigPayload)
 		require.NoError(t, err)
 
-		id, err = q.Put(bytes.NewReader(bigPayload))
+		id, err = q.Put(bytes.NewReader(bigPayload), nil)
 		require.NoError(t, err)
 
 		require.FileExists(t, fmt.Sprint(tmpDir, "/", id))
@@ -99,7 +99,7 @@ func TestNew(t *testing.T) {
 				defer writers.Done()
 				var v [4]byte
 				binary.BigEndian.PutUint32(v[:], uint32(i))
-				_, err := q.Put(bytes.NewReader(v[:]))
+				_, err := q.Put(bytes.NewReader(v[:]), nil)
 				require.NoError(t, err)
 			}(i)
 		}
@@ -114,12 +114,28 @@ func TestNew(t *testing.T) {
 
 		require.Equal(t, uint32(expected), sum)
 	})
+
+	t.Run("user-defined properties should work", func(t *testing.T) {
+		err := q.Clear()
+		require.NoError(t, err)
+		_, err = q.Put(bytes.NewBufferString("hello world"), map[string][]byte{
+			"author":  []byte("reddec"),
+			"license": []byte("MIT"),
+		})
+		require.NoError(t, err)
+		msg, err := q.Try()
+		require.NoError(t, err)
+		defer msg.Commit(true)
+		assert.Equal(t, "reddec", msg.Get("author"))
+		assert.Equal(t, "MIT", msg.Get("license"))
+		assert.Empty(t, msg.Get("unknown"))
+	})
 }
 
 func ExampleDefault() {
 	// error handling omitted for convenience
 	q, _ := pqueue.Default("./data")
-	id, _ := q.Put(bytes.NewBufferString("hello world"))
+	id, _ := q.Put(bytes.NewBufferString("hello world"), nil)
 	fmt.Println("id:", id)
 
 	msg, _ := q.Get(context.TODO())

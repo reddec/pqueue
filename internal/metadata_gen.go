@@ -8,79 +8,195 @@ import (
 
 // DecodeMsg implements msgp.Decodable
 func (z *Metadata) DecodeMsg(dc *msgp.Reader) (err error) {
+	var field []byte
+	_ = field
 	var zb0001 uint32
-	zb0001, err = dc.ReadArrayHeader()
+	zb0001, err = dc.ReadMapHeader()
 	if err != nil {
 		err = msgp.WrapError(err)
 		return
 	}
-	if zb0001 != 5 {
-		err = msgp.ArrayError{Wanted: 5, Got: zb0001}
-		return
-	}
-	z.Version, err = dc.ReadUint16()
-	if err != nil {
-		err = msgp.WrapError(err, "Version")
-		return
-	}
-	{
-		var zb0002 byte
-		zb0002, err = dc.ReadByte()
+	for zb0001 > 0 {
+		zb0001--
+		field, err = dc.ReadMapKeyPtr()
 		if err != nil {
-			err = msgp.WrapError(err, "PackageType")
+			err = msgp.WrapError(err)
 			return
 		}
-		z.PackageType = PackagingType(zb0002)
-	}
-	z.Size, err = dc.ReadInt64()
-	if err != nil {
-		err = msgp.WrapError(err, "Size")
-		return
-	}
-	z.Attempts, err = dc.ReadInt64()
-	if err != nil {
-		err = msgp.WrapError(err, "Attempts")
-		return
-	}
-	z.InlineData, err = dc.ReadBytes(z.InlineData)
-	if err != nil {
-		err = msgp.WrapError(err, "InlineData")
-		return
+		switch msgp.UnsafeString(field) {
+		case "t":
+			{
+				var zb0002 byte
+				zb0002, err = dc.ReadByte()
+				if err != nil {
+					err = msgp.WrapError(err, "PackageType")
+					return
+				}
+				z.PackageType = PackagingType(zb0002)
+			}
+		case "s":
+			z.Size, err = dc.ReadInt64()
+			if err != nil {
+				err = msgp.WrapError(err, "Size")
+				return
+			}
+		case "a":
+			z.Attempts, err = dc.ReadInt64()
+			if err != nil {
+				err = msgp.WrapError(err, "Attempts")
+				return
+			}
+		case "d":
+			z.InlineData, err = dc.ReadBytes(z.InlineData)
+			if err != nil {
+				err = msgp.WrapError(err, "InlineData")
+				return
+			}
+		case "p":
+			var zb0003 uint32
+			zb0003, err = dc.ReadMapHeader()
+			if err != nil {
+				err = msgp.WrapError(err, "Properties")
+				return
+			}
+			if z.Properties == nil {
+				z.Properties = make(map[string][]byte, zb0003)
+			} else if len(z.Properties) > 0 {
+				for key := range z.Properties {
+					delete(z.Properties, key)
+				}
+			}
+			for zb0003 > 0 {
+				zb0003--
+				var za0001 string
+				var za0002 []byte
+				za0001, err = dc.ReadString()
+				if err != nil {
+					err = msgp.WrapError(err, "Properties")
+					return
+				}
+				za0002, err = dc.ReadBytes(za0002)
+				if err != nil {
+					err = msgp.WrapError(err, "Properties", za0001)
+					return
+				}
+				z.Properties[za0001] = za0002
+			}
+		default:
+			err = dc.Skip()
+			if err != nil {
+				err = msgp.WrapError(err)
+				return
+			}
+		}
 	}
 	return
 }
 
 // EncodeMsg implements msgp.Encodable
 func (z *Metadata) EncodeMsg(en *msgp.Writer) (err error) {
-	// array header, size 5
-	err = en.Append(0x95)
+	// omitempty: check for empty values
+	zb0001Len := uint32(5)
+	var zb0001Mask uint8 /* 5 bits */
+	if z.PackageType == 0 {
+		zb0001Len--
+		zb0001Mask |= 0x1
+	}
+	if z.Size == 0 {
+		zb0001Len--
+		zb0001Mask |= 0x2
+	}
+	if z.Attempts == 0 {
+		zb0001Len--
+		zb0001Mask |= 0x4
+	}
+	if z.InlineData == nil {
+		zb0001Len--
+		zb0001Mask |= 0x8
+	}
+	if z.Properties == nil {
+		zb0001Len--
+		zb0001Mask |= 0x10
+	}
+	// variable map header, size zb0001Len
+	err = en.Append(0x80 | uint8(zb0001Len))
 	if err != nil {
 		return
 	}
-	err = en.WriteUint16(z.Version)
-	if err != nil {
-		err = msgp.WrapError(err, "Version")
+	if zb0001Len == 0 {
 		return
 	}
-	err = en.WriteByte(byte(z.PackageType))
-	if err != nil {
-		err = msgp.WrapError(err, "PackageType")
-		return
+	if (zb0001Mask & 0x1) == 0 { // if not empty
+		// write "t"
+		err = en.Append(0xa1, 0x74)
+		if err != nil {
+			return
+		}
+		err = en.WriteByte(byte(z.PackageType))
+		if err != nil {
+			err = msgp.WrapError(err, "PackageType")
+			return
+		}
 	}
-	err = en.WriteInt64(z.Size)
-	if err != nil {
-		err = msgp.WrapError(err, "Size")
-		return
+	if (zb0001Mask & 0x2) == 0 { // if not empty
+		// write "s"
+		err = en.Append(0xa1, 0x73)
+		if err != nil {
+			return
+		}
+		err = en.WriteInt64(z.Size)
+		if err != nil {
+			err = msgp.WrapError(err, "Size")
+			return
+		}
 	}
-	err = en.WriteInt64(z.Attempts)
-	if err != nil {
-		err = msgp.WrapError(err, "Attempts")
-		return
+	if (zb0001Mask & 0x4) == 0 { // if not empty
+		// write "a"
+		err = en.Append(0xa1, 0x61)
+		if err != nil {
+			return
+		}
+		err = en.WriteInt64(z.Attempts)
+		if err != nil {
+			err = msgp.WrapError(err, "Attempts")
+			return
+		}
 	}
-	err = en.WriteBytes(z.InlineData)
-	if err != nil {
-		err = msgp.WrapError(err, "InlineData")
-		return
+	if (zb0001Mask & 0x8) == 0 { // if not empty
+		// write "d"
+		err = en.Append(0xa1, 0x64)
+		if err != nil {
+			return
+		}
+		err = en.WriteBytes(z.InlineData)
+		if err != nil {
+			err = msgp.WrapError(err, "InlineData")
+			return
+		}
+	}
+	if (zb0001Mask & 0x10) == 0 { // if not empty
+		// write "p"
+		err = en.Append(0xa1, 0x70)
+		if err != nil {
+			return
+		}
+		err = en.WriteMapHeader(uint32(len(z.Properties)))
+		if err != nil {
+			err = msgp.WrapError(err, "Properties")
+			return
+		}
+		for za0001, za0002 := range z.Properties {
+			err = en.WriteString(za0001)
+			if err != nil {
+				err = msgp.WrapError(err, "Properties")
+				return
+			}
+			err = en.WriteBytes(za0002)
+			if err != nil {
+				err = msgp.WrapError(err, "Properties", za0001)
+				return
+			}
+		}
 	}
 	return
 }
@@ -88,56 +204,149 @@ func (z *Metadata) EncodeMsg(en *msgp.Writer) (err error) {
 // MarshalMsg implements msgp.Marshaler
 func (z *Metadata) MarshalMsg(b []byte) (o []byte, err error) {
 	o = msgp.Require(b, z.Msgsize())
-	// array header, size 5
-	o = append(o, 0x95)
-	o = msgp.AppendUint16(o, z.Version)
-	o = msgp.AppendByte(o, byte(z.PackageType))
-	o = msgp.AppendInt64(o, z.Size)
-	o = msgp.AppendInt64(o, z.Attempts)
-	o = msgp.AppendBytes(o, z.InlineData)
+	// omitempty: check for empty values
+	zb0001Len := uint32(5)
+	var zb0001Mask uint8 /* 5 bits */
+	if z.PackageType == 0 {
+		zb0001Len--
+		zb0001Mask |= 0x1
+	}
+	if z.Size == 0 {
+		zb0001Len--
+		zb0001Mask |= 0x2
+	}
+	if z.Attempts == 0 {
+		zb0001Len--
+		zb0001Mask |= 0x4
+	}
+	if z.InlineData == nil {
+		zb0001Len--
+		zb0001Mask |= 0x8
+	}
+	if z.Properties == nil {
+		zb0001Len--
+		zb0001Mask |= 0x10
+	}
+	// variable map header, size zb0001Len
+	o = append(o, 0x80|uint8(zb0001Len))
+	if zb0001Len == 0 {
+		return
+	}
+	if (zb0001Mask & 0x1) == 0 { // if not empty
+		// string "t"
+		o = append(o, 0xa1, 0x74)
+		o = msgp.AppendByte(o, byte(z.PackageType))
+	}
+	if (zb0001Mask & 0x2) == 0 { // if not empty
+		// string "s"
+		o = append(o, 0xa1, 0x73)
+		o = msgp.AppendInt64(o, z.Size)
+	}
+	if (zb0001Mask & 0x4) == 0 { // if not empty
+		// string "a"
+		o = append(o, 0xa1, 0x61)
+		o = msgp.AppendInt64(o, z.Attempts)
+	}
+	if (zb0001Mask & 0x8) == 0 { // if not empty
+		// string "d"
+		o = append(o, 0xa1, 0x64)
+		o = msgp.AppendBytes(o, z.InlineData)
+	}
+	if (zb0001Mask & 0x10) == 0 { // if not empty
+		// string "p"
+		o = append(o, 0xa1, 0x70)
+		o = msgp.AppendMapHeader(o, uint32(len(z.Properties)))
+		for za0001, za0002 := range z.Properties {
+			o = msgp.AppendString(o, za0001)
+			o = msgp.AppendBytes(o, za0002)
+		}
+	}
 	return
 }
 
 // UnmarshalMsg implements msgp.Unmarshaler
 func (z *Metadata) UnmarshalMsg(bts []byte) (o []byte, err error) {
+	var field []byte
+	_ = field
 	var zb0001 uint32
-	zb0001, bts, err = msgp.ReadArrayHeaderBytes(bts)
+	zb0001, bts, err = msgp.ReadMapHeaderBytes(bts)
 	if err != nil {
 		err = msgp.WrapError(err)
 		return
 	}
-	if zb0001 != 5 {
-		err = msgp.ArrayError{Wanted: 5, Got: zb0001}
-		return
-	}
-	z.Version, bts, err = msgp.ReadUint16Bytes(bts)
-	if err != nil {
-		err = msgp.WrapError(err, "Version")
-		return
-	}
-	{
-		var zb0002 byte
-		zb0002, bts, err = msgp.ReadByteBytes(bts)
+	for zb0001 > 0 {
+		zb0001--
+		field, bts, err = msgp.ReadMapKeyZC(bts)
 		if err != nil {
-			err = msgp.WrapError(err, "PackageType")
+			err = msgp.WrapError(err)
 			return
 		}
-		z.PackageType = PackagingType(zb0002)
-	}
-	z.Size, bts, err = msgp.ReadInt64Bytes(bts)
-	if err != nil {
-		err = msgp.WrapError(err, "Size")
-		return
-	}
-	z.Attempts, bts, err = msgp.ReadInt64Bytes(bts)
-	if err != nil {
-		err = msgp.WrapError(err, "Attempts")
-		return
-	}
-	z.InlineData, bts, err = msgp.ReadBytesBytes(bts, z.InlineData)
-	if err != nil {
-		err = msgp.WrapError(err, "InlineData")
-		return
+		switch msgp.UnsafeString(field) {
+		case "t":
+			{
+				var zb0002 byte
+				zb0002, bts, err = msgp.ReadByteBytes(bts)
+				if err != nil {
+					err = msgp.WrapError(err, "PackageType")
+					return
+				}
+				z.PackageType = PackagingType(zb0002)
+			}
+		case "s":
+			z.Size, bts, err = msgp.ReadInt64Bytes(bts)
+			if err != nil {
+				err = msgp.WrapError(err, "Size")
+				return
+			}
+		case "a":
+			z.Attempts, bts, err = msgp.ReadInt64Bytes(bts)
+			if err != nil {
+				err = msgp.WrapError(err, "Attempts")
+				return
+			}
+		case "d":
+			z.InlineData, bts, err = msgp.ReadBytesBytes(bts, z.InlineData)
+			if err != nil {
+				err = msgp.WrapError(err, "InlineData")
+				return
+			}
+		case "p":
+			var zb0003 uint32
+			zb0003, bts, err = msgp.ReadMapHeaderBytes(bts)
+			if err != nil {
+				err = msgp.WrapError(err, "Properties")
+				return
+			}
+			if z.Properties == nil {
+				z.Properties = make(map[string][]byte, zb0003)
+			} else if len(z.Properties) > 0 {
+				for key := range z.Properties {
+					delete(z.Properties, key)
+				}
+			}
+			for zb0003 > 0 {
+				var za0001 string
+				var za0002 []byte
+				zb0003--
+				za0001, bts, err = msgp.ReadStringBytes(bts)
+				if err != nil {
+					err = msgp.WrapError(err, "Properties")
+					return
+				}
+				za0002, bts, err = msgp.ReadBytesBytes(bts, za0002)
+				if err != nil {
+					err = msgp.WrapError(err, "Properties", za0001)
+					return
+				}
+				z.Properties[za0001] = za0002
+			}
+		default:
+			bts, err = msgp.Skip(bts)
+			if err != nil {
+				err = msgp.WrapError(err)
+				return
+			}
+		}
 	}
 	o = bts
 	return
@@ -145,7 +354,13 @@ func (z *Metadata) UnmarshalMsg(bts []byte) (o []byte, err error) {
 
 // Msgsize returns an upper bound estimate of the number of bytes occupied by the serialized message
 func (z *Metadata) Msgsize() (s int) {
-	s = 1 + msgp.Uint16Size + msgp.ByteSize + msgp.Int64Size + msgp.Int64Size + msgp.BytesPrefixSize + len(z.InlineData)
+	s = 1 + 2 + msgp.ByteSize + 2 + msgp.Int64Size + 2 + msgp.Int64Size + 2 + msgp.BytesPrefixSize + len(z.InlineData) + 2 + msgp.MapHeaderSize
+	if z.Properties != nil {
+		for za0001, za0002 := range z.Properties {
+			_ = za0002
+			s += msgp.StringPrefixSize + len(za0001) + msgp.BytesPrefixSize + len(za0002)
+		}
+	}
 	return
 }
 
