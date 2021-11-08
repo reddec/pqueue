@@ -27,11 +27,6 @@ var (
 	ErrEmpty = errors.New("queue is empty")
 )
 
-const (
-	inlineData byte = 0 // content stored in next bytes
-	linkedData byte = 1 // content stored in attached file
-)
-
 // Default is alias to Open with all defaults. dir/data as storage dir and dir/index.db
 // as metadata storage.  Queue must be closed to avoid resource leak.
 func Default(dir string) (*ClosableQueue, error) {
@@ -178,24 +173,28 @@ func (bq *Queue) Try() (message *Message, err error) {
 				continue // already locked or broken
 			}
 
-			switch v[0] {
-			case inlineData:
+			var meta internal.Metadata
+			_, err := meta.UnmarshalMsg(v)
+			if err != nil {
+				return fmt.Errorf("broken message %d record: %w", id, err)
+			}
+
+			switch meta.PackageType {
+			case internal.InlineData:
 				// message data stored as next bytes
 				message = &Message{
 					id:     id,
-					kind:   inlineData,
 					queue:  bq,
-					size:   int64(len(v[1:])),
-					reader: io.NopCloser(bytes.NewReader(v[1:])),
+					meta:   meta,
+					reader: io.NopCloser(bytes.NewReader(meta.InlineData)),
 				}
-			case linkedData:
+			case internal.LinkedData:
 				// message data stored as linked file
 				fallthrough
 			default:
 				message = &Message{
 					id:    id,
-					size:  int64(binary.BigEndian.Uint64(v[1:])),
-					kind:  linkedData,
+					meta:  meta,
 					queue: bq,
 				}
 			}
@@ -245,7 +244,8 @@ func (bq *Queue) Clear() error {
 				return fmt.Errorf("remove record %d: %w", id, err)
 			}
 			bq.locked.Remove(id)
-			if len(v) > 0 && v[0] == linkedData {
+			var meta internal.Metadata
+			if _, err := meta.UnmarshalMsg(v); err == nil && meta.PackageType == internal.LinkedData {
 				if err := os.Remove(bq.linkedFile(id)); err != nil {
 					return fmt.Errorf("remove linked file for record %d: %w", id, err)
 				}
@@ -256,12 +256,50 @@ func (bq *Queue) Clear() error {
 }
 
 // commit single message by ID and release lock. Discard also removes message.
-func (bq *Queue) commit(id uint64, kind byte, discard bool) error {
+// in case discard=false, message will be re-saved with new attempt value.
+func (bq *Queue) commit(id uint64, kind internal.PackagingType, discard bool) error {
 	if !discard {
-		bq.locked.Remove(id)
-		bq.notifyReady()
-		return nil
+		return bq.requeue(id)
 	}
+
+	return bq.discard(id, kind)
+}
+
+// requeue message back to queue and increment attempt number.
+func (bq *Queue) requeue(id uint64) error {
+	defer bq.notifyReady()
+	defer bq.locked.Remove(id)
+	var k [8]byte
+	binary.BigEndian.PutUint64(k[:], id)
+
+	// we have to increment attempts number
+	return bq.db.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bq.bucket)
+		if b == nil {
+			return nil
+		}
+		v := b.Get(k[:])
+		if v == nil {
+			// we have ID but no metadata...
+			// something strange but OK, let's ignore it
+			return nil
+		}
+		var meta internal.Metadata
+		_, err := meta.UnmarshalMsg(v)
+		if err != nil {
+			return fmt.Errorf("parse metadata for message %d: %w", id, err)
+		}
+		meta.Attempts++
+		v, err = meta.MarshalMsg(v) // there is high chance that buffer will be re-used
+		if err != nil {
+			return fmt.Errorf("marshal metadata for message %d: %w", id, err)
+		}
+		return b.Put(k[:], v)
+	})
+}
+
+// discard message from queue and remove linked files if needed.
+func (bq *Queue) discard(id uint64, kind internal.PackagingType) error {
 	var k [8]byte
 	binary.BigEndian.PutUint64(k[:], id)
 
@@ -276,47 +314,48 @@ func (bq *Queue) commit(id uint64, kind byte, discard bool) error {
 	if err != nil {
 		return fmt.Errorf("remove entry from queue: %w", err)
 	}
-	// it's safe now unlock entry because we removed it from the queue.
+	// it's now safe to unlock entry because we removed it from the queue.
 	// no need to notify - we are not releasing message.
 	bq.locked.Remove(id)
 
-	if kind == linkedData {
+	if kind == internal.LinkedData {
 		if err := os.Remove(bq.linkedFile(id)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("remove linked file: %w", err)
 		}
 	}
-
 	return nil
 }
 
 func (bq *Queue) storeStream(stream io.Reader) ([]byte, *os.File, error) {
-	var buffer = make([]byte, 1+bq.inlineSize+1) // 1 for marker, content, trigger
-	buffer[0] = inlineData
-	// pre-fetch piece of stream 1 byte bigger then inline size
-	n, err := readBuffer(stream, buffer[1:])
+	var meta internal.Metadata
+	meta.Version = internal.CurrentVersion
+	meta.PackageType = internal.InlineData // by default
 
+	var buffer = make([]byte, 1+bq.inlineSize) // +1 for trigger
+	// pre-fetch piece of stream 1 byte bigger then inline size
+	n, err := readBuffer(stream, buffer)
 	if err != nil {
 		return nil, nil, fmt.Errorf("pre-fetch stream: %w", err)
 	}
 	if n <= bq.inlineSize {
 		// content will be stored in the queue
-		return buffer[:1+n], nil, nil
+		meta.InlineData = buffer[:n]
+		meta.Size = int64(n)
+		data, err := meta.MarshalMsg(nil) // this sub-optimal place 'cause we are using re-allocating buffer
+		return data, nil, err
 	}
 	// content should be stored in file
-	if len(buffer) < 9 {
-		buffer = make([]byte, 9) // 1 flags + 8 size
-	} else {
-		buffer = buffer[:9]
-	}
-	buffer[0] = linkedData
+	meta.PackageType = internal.LinkedData
 
-	f, written, err := bq.saveLinkedData(io.MultiReader(bytes.NewReader(buffer[1:1+n]), stream))
+	f, written, err := bq.saveLinkedData(io.MultiReader(bytes.NewReader(buffer), stream))
 	if err != nil {
 		return nil, nil, fmt.Errorf("save linked data: %w", err)
 	}
 	// add information about size
-	binary.BigEndian.PutUint64(buffer[1:], uint64(written))
-	return buffer, f, err
+	meta.Size = written
+	// re-encode metadata
+	data, err := meta.MarshalMsg(nil)
+	return data, f, err
 }
 
 func (bq *Queue) saveLinkedData(data io.Reader) (*os.File, int64, error) {
@@ -351,17 +390,21 @@ func (bq *Queue) notifyReady() {
 
 type Message struct {
 	id       uint64
-	size     int64
-	kind     byte
+	meta     internal.Metadata
 	complete bool
 	queue    *Queue
 	reader   io.ReadCloser
 	lock     sync.Mutex
 }
 
+// Attempt number started from 1. Increased every commit with discard=false.
+func (m *Message) Attempt() int64 {
+	return m.meta.Attempts
+}
+
 // Size of content in bytes.
 func (m *Message) Size() int64 {
-	return m.size
+	return m.meta.Size
 }
 
 // Read message content. Automatically opens linked file if needed.
@@ -406,7 +449,7 @@ func (m *Message) Commit(discard bool) error {
 		_ = m.reader.Close()
 	}
 	m.lock.Unlock()
-	return m.queue.commit(m.id, m.kind, discard)
+	return m.queue.commit(m.id, m.meta.PackageType, discard)
 }
 
 func readBuffer(reader io.Reader, buffer []byte) (int, error) {
