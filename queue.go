@@ -399,7 +399,7 @@ type Message struct {
 
 // Attempt number started from 1. Increased every commit with discard=false.
 func (m *Message) Attempt() int64 {
-	return m.meta.Attempts
+	return m.meta.Attempts + 1
 }
 
 // Size of content in bytes.
