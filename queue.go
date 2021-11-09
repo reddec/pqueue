@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"sync/atomic"
 
 	"github.com/reddec/pqueue/internal"
 	"go.etcd.io/bbolt"
@@ -78,6 +79,15 @@ func New(db *bbolt.DB, config Config) *Queue {
 	}
 }
 
+// Stats of queue operation.
+type Stats struct {
+	Added    int64 // total amount of successfully added items to the queue (can only grow)
+	Returned int64 // total amount of successfully committed items with discard=false (can only grow)
+	Removed  int64 // total amount of successfully committed items with discard=true (can only grow)
+	Size     int64 // size of the queue
+	Locked   int64 // number of locked messages
+}
+
 type ClosableQueue struct {
 	*Queue
 }
@@ -95,6 +105,7 @@ func (cq *ClosableQueue) Close() error {
 // links to payload files will be broken.
 type Queue struct {
 	inlineSize   int
+	stats        Stats
 	storageDir   string
 	db           *bbolt.DB
 	bucket       []byte
@@ -149,6 +160,7 @@ func (bq *Queue) Put(data io.Reader, properties map[string][]byte) (uint64, erro
 		return b.Put(k[:], metadata)
 	})
 	if err == nil {
+		atomic.AddInt64(&bq.stats.Added, 1)
 		bq.notifyReady()
 		return assignedID, nil
 	}
@@ -258,14 +270,39 @@ func (bq *Queue) Clear() error {
 	})
 }
 
+// Stats snapshot. It requires view transaction to the kv database, so it is not free in terms of performance.
+func (bq *Queue) Stats() Stats {
+	var size int64
+	_ = bq.db.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bq.bucket)
+		if b != nil {
+			size = int64(b.Stats().KeyN)
+		}
+		return nil
+	})
+	cp := bq.stats
+	cp.Size = size
+	cp.Locked = int64(bq.locked.Size())
+	return cp
+}
+
 // commit single message by ID and release lock. Discard also removes message.
 // in case discard=false, message will be re-saved with new attempt value.
-func (bq *Queue) commit(id uint64, kind internal.PackagingType, discard bool) error {
+func (bq *Queue) commit(id uint64, kind internal.PackagingType, discard bool) (err error) {
 	if !discard {
-		return bq.requeue(id)
+		err = bq.requeue(id)
+	} else {
+		err = bq.discard(id, kind)
 	}
-
-	return bq.discard(id, kind)
+	if err != nil {
+		return err
+	}
+	if discard {
+		atomic.AddInt64(&bq.stats.Removed, 1)
+	} else {
+		atomic.AddInt64(&bq.stats.Returned, 1)
+	}
+	return nil
 }
 
 // requeue message back to queue and increment attempt number.

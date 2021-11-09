@@ -4,7 +4,14 @@ import "sync"
 
 type IntSet struct {
 	values map[uint64]bool
-	lock   sync.Mutex
+	lock   sync.RWMutex
+}
+
+// Size of set.
+func (is *IntSet) Size() int {
+	is.lock.RLock()
+	defer is.lock.RUnlock()
+	return len(is.values)
 }
 
 // Add element to set. Returns true if was no value before.

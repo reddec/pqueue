@@ -130,6 +130,63 @@ func TestNew(t *testing.T) {
 		assert.Equal(t, "MIT", msg.Get("license"))
 		assert.Empty(t, msg.Get("unknown"))
 	})
+
+	t.Run("stats are working", func(t *testing.T) {
+		tmpDir, err := ioutil.TempDir("", "")
+		require.NoError(t, err)
+		defer os.RemoveAll(tmpDir)
+
+		q, err := pqueue.Open(filepath.Join(tmpDir, "index.db"), pqueue.Config{
+			StorageDir: tmpDir,
+		})
+		require.NoError(t, err)
+		defer q.Close()
+
+		require.Empty(t, q.Stats())
+
+		require.NoError(t, err)
+		_, err = q.Put(bytes.NewBufferString("hello world"), nil)
+		require.NoError(t, err)
+		_, err = q.Put(bytes.NewBufferString("hello world"), nil)
+		require.NoError(t, err)
+
+		stats := q.Stats()
+		assert.Equal(t, int64(2), stats.Added)
+		assert.Equal(t, int64(2), stats.Size)
+		assert.Equal(t, int64(0), stats.Removed)
+		assert.Equal(t, int64(0), stats.Returned)
+		assert.Equal(t, int64(0), stats.Locked)
+
+		m, err := q.Try()
+		require.NoError(t, err)
+		stats = q.Stats()
+		assert.Equal(t, int64(2), stats.Added)
+		assert.Equal(t, int64(2), stats.Size)
+		assert.Equal(t, int64(0), stats.Removed)
+		assert.Equal(t, int64(0), stats.Returned)
+		assert.Equal(t, int64(1), stats.Locked)
+
+		err = m.Commit(true)
+		require.NoError(t, err)
+		stats = q.Stats()
+		assert.Equal(t, int64(2), stats.Added)
+		assert.Equal(t, int64(1), stats.Size)
+		assert.Equal(t, int64(1), stats.Removed)
+		assert.Equal(t, int64(0), stats.Returned)
+		assert.Equal(t, int64(0), stats.Locked)
+
+		m, err = q.Try()
+		require.NoError(t, err)
+		err = m.Commit(false)
+		require.NoError(t, err)
+
+		stats = q.Stats()
+		assert.Equal(t, int64(2), stats.Added)
+		assert.Equal(t, int64(1), stats.Size)
+		assert.Equal(t, int64(1), stats.Removed)
+		assert.Equal(t, int64(1), stats.Returned)
+		assert.Equal(t, int64(0), stats.Locked)
+	})
 }
 
 func ExampleDefault() {
