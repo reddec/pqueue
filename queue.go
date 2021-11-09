@@ -330,7 +330,7 @@ func (bq *Queue) requeue(id uint64) error {
 			return fmt.Errorf("parse metadata for message %d: %w", id, err)
 		}
 		meta.Attempts++
-		v, err = meta.MarshalMsg(v) // there is high chance that buffer will be re-used
+		v, err = meta.MarshalMsg(nil)
 		if err != nil {
 			return fmt.Errorf("marshal metadata for message %d: %w", id, err)
 		}

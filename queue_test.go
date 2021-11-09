@@ -187,6 +187,25 @@ func TestNew(t *testing.T) {
 		assert.Equal(t, int64(1), stats.Returned)
 		assert.Equal(t, int64(0), stats.Locked)
 	})
+
+	t.Run("attempts saved", func(t *testing.T) {
+		err := q.Clear()
+		require.NoError(t, err)
+		_, err = q.Put(bytes.NewBufferString("hello world"), nil)
+		require.NoError(t, err)
+
+		msg, err := q.Try()
+		require.NoError(t, err)
+
+		require.Equal(t, int64(1), msg.Attempt())
+		err = msg.Commit(false)
+		require.NoError(t, err)
+
+		msg, err = q.Try()
+		require.NoError(t, err)
+
+		require.Equal(t, int64(2), msg.Attempt())
+	})
 }
 
 func ExampleDefault() {
