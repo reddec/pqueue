@@ -198,10 +198,9 @@ func (bq *Queue) Try() (message *Message, err error) {
 			case internal.InlineData:
 				// message data stored as next bytes
 				message = &Message{
-					id:     id,
-					queue:  bq,
-					meta:   meta,
-					reader: io.NopCloser(bytes.NewReader(meta.InlineData)),
+					id:    id,
+					queue: bq,
+					meta:  meta,
 				}
 			case internal.LinkedData:
 				// message data stored as linked file
@@ -433,7 +432,6 @@ type Message struct {
 	meta     internal.Metadata
 	complete bool
 	queue    *Queue
-	reader   io.ReadCloser
 	lock     sync.Mutex
 }
 
@@ -457,43 +455,33 @@ func (m *Message) Get(propertyName string) string {
 	return string(m.meta.Properties[propertyName])
 }
 
-// Read message content. Automatically opens linked file if needed.
-func (m *Message) Read(buf []byte) (int, error) {
-	if m.reader != nil {
-		return m.reader.Read(buf)
-	}
-	m.lock.Lock()
-	defer m.lock.Unlock()
-	if m.reader != nil {
-		return m.reader.Read(buf)
-	}
-	if m.complete {
-		return 0, os.ErrClosed
-	}
-	file := m.queue.linkedFile(m.id)
-	f, err := os.Open(file)
-	if err != nil {
-		return 0, fmt.Errorf("open linked filed: %w", err)
-	}
-	m.reader = f
-	return m.reader.Read(buf)
-}
-
 // ID of message. Unique within queue.
 func (m *Message) ID() uint64 {
 	return m.id
 }
 
-// Dup creates duplicated stream of payload. Duplicated stream must be closed individually.
-func (m *Message) Dup() (io.ReadCloser, error) {
+// Open stream of payload. Can be invoked several times to get multiple parallel streams.
+// All streams must be closed individually.
+func (m *Message) Open() (io.ReadSeekCloser, error) {
 	switch m.meta.PackageType {
 	case internal.InlineData:
-		return io.NopCloser(bytes.NewReader(m.meta.InlineData)), nil
+		return &readSeekNopCloser{ReadSeeker: bytes.NewReader(m.meta.InlineData)}, nil
 	case internal.LinkedData:
 		return os.Open(m.queue.linkedFile(m.id))
 	default:
-		return nil, fmt.Errorf("can not make dup for message type %d", m.meta.PackageType)
+		return nil, fmt.Errorf("can not create stream for message type %d", m.meta.PackageType)
 	}
+}
+
+// Bytes of payload. Danger for big payload!
+func (m *Message) Bytes() ([]byte, error) {
+	if m.meta.PackageType == internal.InlineData {
+		return m.meta.InlineData, nil
+	}
+	if m.meta.PackageType == internal.LinkedData {
+		return ioutil.ReadFile(m.queue.linkedFile(m.id))
+	}
+	return nil, fmt.Errorf("can not detect message type %d", m.meta.PackageType)
 }
 
 // Commit message from the queue.
@@ -507,9 +495,6 @@ func (m *Message) Commit(discard bool) error {
 		return nil
 	}
 	m.complete = true
-	if m.reader != nil {
-		_ = m.reader.Close()
-	}
 	m.lock.Unlock()
 	return m.queue.commit(m.id, m.meta.PackageType, discard)
 }
@@ -528,4 +513,12 @@ func readBuffer(reader io.Reader, buffer []byte) (int, error) {
 		total += v
 	}
 	return total, nil
+}
+
+type readSeekNopCloser struct {
+	io.ReadSeeker
+}
+
+func (rsnc *readSeekNopCloser) Close() error {
+	return nil
 }

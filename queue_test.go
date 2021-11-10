@@ -39,7 +39,7 @@ func TestNew(t *testing.T) {
 	msg, err := q.Try()
 	require.NoError(t, err)
 	require.Equal(t, id, msg.ID())
-	data, err := ioutil.ReadAll(msg)
+	data, err := msg.Bytes()
 	require.NoError(t, err)
 	assert.Equal(t, "some data", string(data))
 	assert.Equal(t, int64(9), msg.Size())
@@ -64,7 +64,7 @@ func TestNew(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, id, m.ID())
 		require.Equal(t, int64(len(bigPayload)), m.Size())
-		loadedPayload, err := io.ReadAll(m)
+		loadedPayload, err := m.Bytes()
 		require.NoError(t, err)
 		require.Equal(t, bigPayload, loadedPayload)
 		err = m.Commit(true)
@@ -86,7 +86,7 @@ func TestNew(t *testing.T) {
 				msg, err := q.Get(context.Background())
 				defer msg.Commit(true)
 				require.NoError(t, err)
-				data, err := ioutil.ReadAll(msg)
+				data, err := msg.Bytes()
 				require.NoError(t, err)
 				v := binary.BigEndian.Uint32(data)
 				atomic.AddUint32(&sum, v)
@@ -216,15 +216,15 @@ func TestNew(t *testing.T) {
 		msg, err = q.Try()
 		require.NoError(t, err)
 
-		s1, err := msg.Dup()
+		s1, err := msg.Open()
 		require.NoError(t, err)
 		defer s1.Close()
 
-		s2, err := msg.Dup()
+		s2, err := msg.Open()
 		require.NoError(t, err)
 		defer s2.Close()
 
-		m0, err := ioutil.ReadAll(msg)
+		m0, err := msg.Bytes()
 		require.NoError(t, err)
 
 		m1, err := ioutil.ReadAll(s1)
@@ -248,15 +248,15 @@ func TestNew(t *testing.T) {
 		msg, err = q.Try()
 		require.NoError(t, err)
 
-		s1, err := msg.Dup()
+		s1, err := msg.Open()
 		require.NoError(t, err)
 		defer s1.Close()
 
-		s2, err := msg.Dup()
+		s2, err := msg.Open()
 		require.NoError(t, err)
 		defer s2.Close()
 
-		m0, err := ioutil.ReadAll(msg)
+		m0, err := msg.Bytes()
 		require.NoError(t, err)
 
 		m1, err := ioutil.ReadAll(s1)
@@ -272,6 +272,7 @@ func TestNew(t *testing.T) {
 }
 
 func ExampleDefault() {
+	_ = os.RemoveAll("./data") // remove old queue
 	// error handling omitted for convenience
 	q, _ := pqueue.Default("./data")
 	id, _ := q.Put(bytes.NewBufferString("hello world"), nil)
@@ -281,7 +282,7 @@ func ExampleDefault() {
 	defer msg.Commit(true)
 
 	fmt.Println("got id:", msg.ID())
-	data, _ := ioutil.ReadAll(msg)
+	data, _ := msg.Bytes() // this will read all payload into memory; for streaming use Open()
 	fmt.Println(string(data))
 	//output:
 	//id: 1
