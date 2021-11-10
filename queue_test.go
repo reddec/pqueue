@@ -206,6 +206,69 @@ func TestNew(t *testing.T) {
 
 		require.Equal(t, int64(2), msg.Attempt())
 	})
+
+	t.Run("duplicated inline streams worked", func(t *testing.T) {
+		err := q.Clear()
+		require.NoError(t, err)
+		_, err = q.Put(bytes.NewBufferString("hello world"), nil)
+		require.NoError(t, err)
+
+		msg, err = q.Try()
+		require.NoError(t, err)
+
+		s1, err := msg.Dup()
+		require.NoError(t, err)
+		defer s1.Close()
+
+		s2, err := msg.Dup()
+		require.NoError(t, err)
+		defer s2.Close()
+
+		m0, err := ioutil.ReadAll(msg)
+		require.NoError(t, err)
+
+		m1, err := ioutil.ReadAll(s1)
+		require.NoError(t, err)
+
+		m2, err := ioutil.ReadAll(s2)
+		require.NoError(t, err)
+
+		require.Equal(t, "hello world", string(m0))
+		require.Equal(t, m0, m1)
+		require.Equal(t, m1, m2)
+	})
+
+	t.Run("duplicated linked streams worked", func(t *testing.T) {
+		err := q.Clear()
+		require.NoError(t, err)
+		bigPayload := make([]byte, pqueue.DefaultInlineSize+1)
+		_, err = q.Put(bytes.NewReader(bigPayload), nil)
+		require.NoError(t, err)
+
+		msg, err = q.Try()
+		require.NoError(t, err)
+
+		s1, err := msg.Dup()
+		require.NoError(t, err)
+		defer s1.Close()
+
+		s2, err := msg.Dup()
+		require.NoError(t, err)
+		defer s2.Close()
+
+		m0, err := ioutil.ReadAll(msg)
+		require.NoError(t, err)
+
+		m1, err := ioutil.ReadAll(s1)
+		require.NoError(t, err)
+
+		m2, err := ioutil.ReadAll(s2)
+		require.NoError(t, err)
+
+		require.Equal(t, bigPayload, m0)
+		require.Equal(t, m0, m1)
+		require.Equal(t, m1, m2)
+	})
 }
 
 func ExampleDefault() {

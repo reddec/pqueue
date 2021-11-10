@@ -484,6 +484,18 @@ func (m *Message) ID() uint64 {
 	return m.id
 }
 
+// Dup creates duplicated stream of payload. Duplicated stream must be closed individually.
+func (m *Message) Dup() (io.ReadCloser, error) {
+	switch m.meta.PackageType {
+	case internal.InlineData:
+		return io.NopCloser(bytes.NewReader(m.meta.InlineData)), nil
+	case internal.LinkedData:
+		return os.Open(m.queue.linkedFile(m.id))
+	default:
+		return nil, fmt.Errorf("can not make dup for message type %d", m.meta.PackageType)
+	}
+}
+
 // Commit message from the queue.
 //
 // If discard flag set, message will be completely removed from the queue, otherwise message will be released and
